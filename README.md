@@ -26,7 +26,7 @@ PuTTY reliably logs serial output into a file and prevents data loss.
 2. Open PuTTY → choose **Serial**
 
    * Serial line: your Arduino COM port
-   * Speed: same as Arduino (e.g., 9600)
+   * Speed: same as Arduino (115200)
 3. Before opening connection:
 
    * Go to **Session → Logging**
