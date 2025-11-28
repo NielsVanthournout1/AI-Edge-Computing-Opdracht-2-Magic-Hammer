@@ -137,52 +137,55 @@ static const char channels = 1;
 short sampleBuffer[512];
 volatile int samplesRead = 0;
 
-// Window sizes
-static const int PRE_MS  = 0;
-static const int POST_MS = 250;
+// Window sizes (ms)
+static const int PRE_MS  = 50;   // audio before hit
+static const int POST_MS = 250;  // audio after hit
 
 static const int PRE_SAMPLES   = (frequency * PRE_MS) / 1000;   // 800
 static const int POST_SAMPLES  = (frequency * POST_MS) / 1000;  // 4000
 static const int EVENT_SAMPLES = PRE_SAMPLES + POST_SAMPLES;    // 4800
 
-// --- Startup + noise handling ---
-static const int WARMUP_MS = 400;          // ignore triggers for first 400ms
-static const int NOISE_CAL_MS = 600;       // measure noise for 600ms
-static const float THRESHOLD_MULT = 4.0f;  // trigger if rms > noiseRms * this
-static const int MIN_THRESHOLD = 1200;     // absolute floor, for very quiet rooms
+// Startup and noise calibration
+static const int WARMUP_MS    = 400;   // ignore triggers at start
+static const int NOISE_CAL_MS = 600;   // measure background noise
+
+static const float THRESHOLD_MULT = 4.0f; // threshold = noiseRms * mult
+static const int MIN_THRESHOLD    = 1200; // minimum RMS threshold
 
 // Trigger robustness
-static const int REQUIRED_CONSECUTIVE = 2; // need 2 loud chunks in a row
-static const int LOCKOUT_MS = 300;         // ignore new hits for 300ms after trigger
+static const int REQUIRED_CONSECUTIVE = 2;  // number of loud chunks needed
+static const int LOCKOUT_MS           = 300; // ignore new hits after a trigger
 
-// Ring buffer for pre-trigger
+// Pre-trigger ring buffer
 short preBuffer[PRE_SAMPLES];
 int preIndex = 0;
 bool preFilled = false;
 
-// Event buffer
+// Event buffer (PRE + POST)
 short eventBuffer[EVENT_SAMPLES];
 int eventIndex = 0;
 bool capturing = false;
 
-bool headerPrinted = false;
-
-// Noise baseline
-bool noiseCalDone = false;
+// State for noise calibration and triggering
 unsigned long startMs;
+bool noiseCalDone = false;
 int64_t noiseSumRms = 0;
 int noiseChunks = 0;
 int noiseRms = 0;
-
 int loudStreak = 0;
 unsigned long lastTriggerMs = 0;
+
+// CSV header flag
+bool headerPrinted = false;
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
 
   PDM.onReceive(onPDMdata);
-  if (!PDM.begin(channels, frequency)) while (1);
+  if (!PDM.begin(channels, frequency)) {
+    while (1);
+  }
 
   startMs = millis();
 }
@@ -193,7 +196,7 @@ void loop() {
   int n = samplesRead;
   samplesRead = 0;
 
-  // Compute RMS for this chunk
+  // Compute RMS of this chunk
   int64_t sumSq = 0;
   for (int i = 0; i < n; i++) {
     int32_t s = sampleBuffer[i];
@@ -213,7 +216,7 @@ void loop() {
     }
   }
 
-  // Warmup: do not calibrate or trigger yet
+  // Warmup phase: ignore triggers
   if (now - startMs < WARMUP_MS) {
     return;
   }
@@ -224,26 +227,29 @@ void loop() {
     noiseChunks++;
 
     if (now - startMs >= (WARMUP_MS + NOISE_CAL_MS)) {
-      noiseRms = (noiseChunks > 0) ? (int)(noiseSumRms / noiseChunks) : 0;
-      if (noiseRms < 1) noiseRms = 1; // avoid divide-by-zero
+      noiseRms = (noiseChunks > 0) ? (int)(noiseSumRms / noiseChunks) : 1;
+      if (noiseRms < 1) noiseRms = 1;
       noiseCalDone = true;
     }
-    return; // don't trigger during calibration
+    return; // do not trigger during calibration
   }
 
   // Dynamic threshold
   int dynamicThreshold = (int)(noiseRms * THRESHOLD_MULT);
   if (dynamicThreshold < MIN_THRESHOLD) dynamicThreshold = MIN_THRESHOLD;
 
-  // Lockout after a trigger
+  // Lockout: ignore triggers right after a hit
   if (!capturing && (now - lastTriggerMs < LOCKOUT_MS)) {
     return;
   }
 
-  // Trigger logic: require consecutive loud chunks
+  // Trigger logic
   if (!capturing && preFilled) {
-    if (rms >= dynamicThreshold) loudStreak++;
-    else loudStreak = 0;
+    if (rms >= dynamicThreshold) {
+      loudStreak++;
+    } else {
+      loudStreak = 0;
+    }
 
     if (loudStreak >= REQUIRED_CONSECUTIVE) {
       capturing = true;
@@ -251,7 +257,7 @@ void loop() {
       loudStreak = 0;
       lastTriggerMs = now;
 
-      // Copy pre-trigger in correct order
+      // Copy PRE window into eventBuffer in correct order
       for (int i = 0; i < PRE_SAMPLES; i++) {
         int idx = (preIndex + i) % PRE_SAMPLES;
         eventBuffer[eventIndex++] = preBuffer[idx];
@@ -259,29 +265,41 @@ void loop() {
     }
   }
 
-  // Capture post-trigger samples
+  // Capture POST samples
   if (capturing) {
     for (int i = 0; i < n && eventIndex < EVENT_SAMPLES; i++) {
       eventBuffer[eventIndex++] = sampleBuffer[i];
     }
 
+    // Window complete -> print ONE CSV row
     if (eventIndex >= EVENT_SAMPLES) {
+      // Print header once: s0,s1,...,s4799
       if (!headerPrinted) {
-        Serial.println("sample");
+        Serial.print("s0");
+        for (int i = 1; i < EVENT_SAMPLES; i++) {
+          Serial.print(",s");
+          Serial.print(i);
+        }
+        Serial.println();
         headerPrinted = true;
       }
 
-      for (int i = 0; i < EVENT_SAMPLES; i++) {
-        Serial.println(eventBuffer[i]);
+      // Print one hit as a single line
+      Serial.print(eventBuffer[0]);
+      for (int i = 1; i < EVENT_SAMPLES; i++) {
+        Serial.print(',');
+        Serial.print(eventBuffer[i]);
       }
+      Serial.println();   // end of this sample (window)
 
       capturing = false;
     }
   }
 }
 
+// PDM callback (ISR): only reading into buffer
 void onPDMdata() {
   int bytesAvailable = PDM.available();
   PDM.read(sampleBuffer, bytesAvailable);
-  samplesRead = bytesAvailable / 2;
+  samplesRead = bytesAvailable / 2; // 2 bytes per sample
 }
