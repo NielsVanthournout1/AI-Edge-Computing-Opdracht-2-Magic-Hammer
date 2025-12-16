@@ -1,4 +1,4 @@
-# Magic Hammer — EDA & Preprocessing
+# Magic Hammer — EDA
 
 Een compacte, moderne README voor het `Magic_Hammer` EDA‑project.
 
