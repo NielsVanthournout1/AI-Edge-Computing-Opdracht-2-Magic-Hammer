@@ -1,20 +1,33 @@
-# Magic Hammer — EDA
 
-Een compacte, moderne README voor het `Magic_Hammer` EDA‑project.
+# Magic Hammer — EDA & Preprocessing
 
-**Wat is dit**
-- Kleine toolkit (Jupyter Notebook) voor exploratory data analysis van hamerslagen die als CSV worden geëxporteerd door het capture‑systeem.
-- Bevat helpers om CSV-rijen (elke rij = één hit, 4800 samples @16kHz) te laden, basisstatistieken te berekenen, en plots te genereren.
+Compacte README voor het `Magic_Hammer` project: interactieve EDA én een preprocessing pipeline die Mel-Frequency Energy (MFE) features berekent, normaliseert en visualiseert.
 
-**Belangrijk**
-- De capture firmware schrijft één hit per CSV‑rij met PRE + POST windows (PRE_MS=50, POST_MS=250) → 4800 samples per hit.
-- Bewaar altijd de ruwe data; preprocessing is optioneel maar aanbevolen voor ML.
+**Wat doet dit repo**
+- Bevat notebooks om raw CSV hits te verkennen (`EDA.ipynb`) en een preprocessing pipeline (`prepro.ipynb`) die:
+	- raw CSV's uit `Data/` leest (elke rij = 1 hit),
+	- MFE (Mel-Frequency Energy) features extraheert met `librosa`,
+	- verwerkte bestanden opslaat in `processed/` (bestandsnaam krijgt suffix `_processed.csv`),
+	- genormaliseerde versies opslaat in `normalized/` en een `scaler.pkl` bewaart.
 
-**Bestanden**
-- `EDA.ipynb` — het interactieve notebook met loader, EDA plots (waveforms, amplitude KDE, FFT, RMS) en cell‑commentaar.
+**Belangrijke directories & bestandsconventies**
 - `Data/` — raw CSV bestanden (bijv. `blik.csv`, `steen.csv`).
-- `requirements.txt` — basis Python dependencies (numpy, pandas, matplotlib, seaborn).
-- `plots/` — door het notebook gegenereerde PNG's (worden aangemaakt bij uitvoeren).
+- `processed/` — MFE features per hit worden hier opgeslagen met de naam `<origineel>_processed.csv`.
+- `normalized/` — genormaliseerde features (StandardScaler) en `scaler.pkl`.
+- `plots/` — optioneel: gegenereerde figuren.
+
+**Hoe de preprocessing werkt (kort)**
+1. `prepro.ipynb` leest alle CSV's in `Data/` en berekent per rij (hit) een MFE-matrix (shape = `n_mels x time_frames`).
+2. Elke MFE-matrix wordt geflattened en per hit als rij in een CSV geschreven naar `processed/<name>_processed.csv`.
+3. Alle `processed/*_processed.csv` bestanden worden geladen en samengevoegd om een `StandardScaler` te fitten.
+4. Geschaalde resultaten worden weggeschreven naar `normalized/<name>_processed.csv` en de scaler wordt opgeslagen als `normalized/scaler.pkl`.
+
+**Visualisatie**
+- `prepro.ipynb` bevat compacte, overzichtelijke visualisaties:
+	- overlappende raw waveforms per materiaal (zodat je direct verschil tussen materialen ziet),
+	- overlappende MFE-gemiddelde per mel-band,
+	- totale MFE-energie per materiaal (bar chart),
+	- per-materiaal pipeline-plots (raw → preprocessed → MFE → normalized).
 
 **Snelle start (Windows / PowerShell)**
 
@@ -22,16 +35,16 @@ Een compacte, moderne README voor het `Magic_Hammer` EDA‑project.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 ```
 
-2) Installeer dependencies
+2) Installeer dependencies (voeg `librosa`, `scikit-learn`, `joblib` toe aan `requirements.txt` als nodig)
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-3) Open en draai het notebook (gebruik Jupyter Lab/Notebook of VS Code)
+3) Start Jupyter en open `prepro.ipynb`
 
 ```powershell
 jupyter lab
@@ -39,14 +52,19 @@ jupyter lab
 jupyter notebook
 ```
 
-4) In `EDA.ipynb`:
-- Voer cell 3 (imports) en cell 5 (laden & samenvatting) uit om data in te laden.
-- Draai visualisatiecellen om plots te inspecteren. Er is ook een cel die `plots/` afbeeldingsbestanden opslaat.
+4) In `prepro.ipynb` voer de cells van boven naar beneden uit:
+- Sectie **Setup**: controleer `DATA_DIR`, `PROCESSED_DIR`, `NORMALIZED_DIR` en MFE-parameters.
+- Sectie **Verwerking**: rekent MFE per hit en schrijft `processed/<name>_processed.csv`.
+- Sectie **Normalisatie**: fit en apply `StandardScaler`, schrijft `normalized/<name>_processed.csv` en `normalized/scaler.pkl`.
+- Sectie **Visualisatie**: draait overzichtsplots met overlapping en per-materiaal pipeline views.
 
-**Aanbevolen minimale preprocessing**
-- Controleer dat elke rij exact `4800` samples heeft; log afwijkingen.
-- Verwijder DC offset: `sig = sig - sig.mean()`.
-- Bewaar raw RMS/peak waarden en maak een genormaliseerde kopie (`peak` of `RMS`) als je plots wilt vergelijken.
-- Optioneel: high-pass <50Hz en align op piek (centreer en crop rond de maximale impact sample).
+**Tips & opmerkingen**
+- Zorg dat alle `processed/*_processed.csv` dezelfde feature-dimensie hebben; anders faalt het samenvoegen.
+- Bij grote datasets: overweeg dtype `float32` en batch-wise processing om geheugen te sparen.
+- Bewaar `normalized/scaler.pkl` als referentie en versieer het wanneer je de dataset uitbreidt.
+
+---
+
+Als je wilt kan ik `requirements.txt` bijwerken met de exacte pakketten die `prepro.ipynb` gebruikt en een korte run-instructie toevoegen. Laat het weten!
 
 
